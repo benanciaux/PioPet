@@ -4,9 +4,10 @@ from unitree_sdk2py.go2.robot_interface import RobotInterface
 
 from unitree_sdk2py.g1.audio.g1_audio_client import AudioClient
 
-
 robot = RobotInterface()
 robot.init()
+
+audio_client.SetVolume(100)
 
 #speech Recognition
 recognizer = sr.Recognizer()
