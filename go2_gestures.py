@@ -265,7 +265,7 @@ def execute_command(gesture, client=None):
         if client: client.StopMove()
         # print("No action")
 
-no_robot = False
+no_robot = True
 
 if __name__ == "__main__":
     if no_robot:
