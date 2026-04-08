@@ -7,10 +7,6 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
-from unitree_sdk2py.core.channel import ChannelFactoryInitialize
-from unitree_sdk2py.go2.video.video_client import VideoClient
-from unitree_sdk2py.go2.sport.sport_client import SportClient
-
 
 class HandDetector:
     FINGERS = {
@@ -21,7 +17,8 @@ class HandDetector:
         "pinky": (17, 18, 19, 20),
     }
 
-    def __init__(self, max_hands=2, mode="live", model_path=r'hand_landmarker.task'):
+    def __init__(self, max_hands=2, mode="live",
+                 model_path="handmark_task"):
         self.latest_landmarks = None
         self.lock = threading.Lock()
 
@@ -54,7 +51,7 @@ class HandDetector:
         timestamp_ms = int(time.time() * 1000)
         self.landmarker.detect_async(mp_image, timestamp_ms)
 
-        if draw is not None:
+        if draw and self.latest_landmarks is not None:
             self.draw.draw_landmarks(image, self.latest_landmarks, self.hands.HAND_CONNECTIONS)
 
     def get_landmarks(self):
@@ -62,8 +59,8 @@ class HandDetector:
             lm = self.latest_landmarks
         if lm is None:
             return None
-
-        return np.array([[i, p.x, p.y, p.z] for i, p in enumerate(lm)])
+        h, w, _ = self.image.shape
+        return np.array([[i, int(p.x*w), int(p.y*h), float(p.z)] for i, p in enumerate(lm)])
 
     def get_angle(self, lms, p1, p2, p3):
         ax, ay, az = lms[p2][1] - lms[p1][1], lms[p2][2] - lms[p1][2], lms[p2][3] - lms[p1][3]
@@ -100,9 +97,9 @@ class HandDetector:
         if name == "thumb":
             if total < 60:
                 return "extended"
-            tx = lms[tip][1] = lms[0][1]
-            ty = lms[tip][2] = lms[0][2]
-            tz = lms[tip][3] = lms[0][3]
+            tx = lms[tip][1] - lms[0][1]
+            ty = lms[tip][2] - lms[0][2]
+            tz = lms[tip][3] - lms[0][3]
             px = lms[5][1] - lms[0][1]
             py = lms[5][2] - lms[0][2]
             pz = lms[5][3] - lms[0][3]
@@ -192,9 +189,10 @@ class HandDetector:
         palm_orientation = self.get_palm_orientation(lms)
 
         # FIST
-        print("palm_orientation", palm_orientation, "direction", direction)
+        # print("palm_orientation", palm_orientation, "direction", direction)
         # print(states["thumb"], states["index"], states["middle"], states["ring"], states["pinky"])
 
+        # stop
         if all(
             states[f] == "extended" for f in ["thumb", "index", "middle", "ring", "pinky"]
         ):
@@ -228,60 +226,131 @@ class HandDetector:
     def close(self):
         self.landmarker.close()
 
+
+def stable_gesture(gesture, buffer=[], size=10, threshold=7):
+    buffer.append(gesture)
+    if len(buffer) > size:
+        buffer.pop(0)
+
+    counts = {}
+    for g in buffer:
+        counts[g] = counts.get(g, 0) + 1
+
+    best = max(counts, key=counts.get)
+    return best if counts[best] >= threshold else "No action"
+
 def execute_command(gesture, client=None):
     if gesture == "COME":
         if client: client.Move(0, 0, 0)
+        # print("COME")
     elif gesture == "STOP":
         if client: client.StopMove()
+        # print("STOP")
     elif gesture == "STAND_UP":
         if client: client.StandUp()
+        # print("STAND_UP")
     elif gesture == "STAND_DOWN":
         if client: client.StandDown()
+        # print("STAND_DOWN")
     elif gesture == "POINTING_LEFT":
-        if client: client.Move(0, 0, 0)
+        if client: client.Move(0, 0.5, 0)
+        # print("POINTING_LEFT")
     elif gesture == "POINTING_RIGHT":
-        if client: client.Move(0, 0, 0)
+        if client: client.Move(0, -0.5, 0)
+        # print("POINTING_RIGHT")
     elif gesture == "SIT":
         if client: client.Sit()
+        # print("SIT")
     elif gesture == "No action":
         if client: client.StopMove()
+        # print("No action")
 
+no_robot = False
 
 if __name__ == "__main__":
-    if len(sys.argv)>1:
-        ChannelFactoryInitialize(0, sys.argv[1])
-    else:
-        ChannelFactoryInitialize(0)
+    if no_robot:
+        from unitree_sdk2py.core.channel import ChannelFactoryInitialize
+        from unitree_sdk2py.go2.video.video_client import VideoClient
+        from unitree_sdk2py.go2.sport.sport_client import SportClient
 
-    video_client = VideoClient()  # Create a video client
-    video_client.SetTimeout(3.0)
-    video_client.Init()
+        if len(sys.argv)>1:
+            ChannelFactoryInitialize(0, sys.argv[1])
+        else:
+            ChannelFactoryInitialize(0)
 
-    sports_client = SportClient()
+        video_client = VideoClient()  # Create a video client
+        video_client.SetTimeout(3.0)
+        video_client.Init()
 
-    code, data = video_client.GetImageSample()
+        sports_client = SportClient()
+        sports_client.SetTimeout(10.0)
+        sports_client.Init()
 
-    detector = HandDetector()
-
-    while code == 0:
         code, data = video_client.GetImageSample()
 
-        image_data = np.frombuffer(bytes(data), dtype=np.uint8)
-        image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
-        detector.find_hands(image, draw=True)
-        landmarks = detector.get_landmarks()
+        detector = HandDetector(model_path='hand_landmarker.task')
+        last_gesture = None
 
-        if landmarks is not None:
-            gesture = detector.classify_gesture(landmarks)
-            execute_command(gesture, sports_client)
+        while code == 0:
+            code, data = video_client.GetImageSample()
 
-        cv2.imshow("front_camera", image)
-        if cv2.waitKey(20) == 27:
-            break
+            image_data = np.frombuffer(bytes(data), dtype=np.uint8)
+            image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+            image = cv2.flip(image, 1)
+            if image is None: continue
+            detector.find_hands(image, draw=True)
+            landmarks = detector.get_landmarks()
 
-    if code != 0:
-        print("Get image sample error. code:", code)
+            if landmarks is not None:
+                raw_gesture = detector.classify_gesture(landmarks)
+                gesture = stable_gesture(raw_gesture)
+
+                if gesture != last_gesture:
+                    print(gesture)
+                    last_gesture = gesture
+
+                execute_command(gesture, sports_client)
+
+            cv2.imshow("front_camera", image)
+            if cv2.waitKey(20) == 27:
+                break
+
+        if code != 0:
+            print("Get image sample error. code:", code)
+        else:
+            cv2.imwrite("front_image.jpg", image)
     else:
-        cv2.imwrite("front_image.jpg", image)
+        cap = cv2.VideoCapture(0)
+        cap.set(3, 640)
+        cap.set(4, 480)
+        detector = HandDetector(model_path=r'C:\Users\matos\PycharmProjects\UGE\models\hand_landmarker.task')
+        last_gesture = None
 
-    cv2.destroyWindow("front_camera")
+        while True:
+            success, image = cap.read()
+            if success is None or image is None: continue
+            image = cv2.flip(image, 1)
+
+            detector.find_hands(image, draw=True)
+            landmarks = detector.get_landmarks()
+
+            if landmarks is not None:
+                raw_gesture = detector.classify_gesture(landmarks)
+                gesture = stable_gesture(raw_gesture)
+
+                if gesture != last_gesture:
+                    print(gesture)
+                    last_gesture = gesture
+
+                execute_command(gesture)
+
+
+            cv2.imshow("front_camera", image)
+            if cv2.waitKey(20) == 27:
+                break
+        cap.release()
+        cv2.destroyWindow("front_camera")
+
+
+
+
