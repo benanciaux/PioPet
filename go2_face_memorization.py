@@ -56,13 +56,13 @@ def extract_name(text):
 
 #get camera
 def get_frame():
-    #SDK camera frame (varies by version!)
+    #SDK camera frame
     frame = robot.camera.get_frame()
 
     if frame is None:
         return None
 
-    #convert to OpenCV format if needed
+    #convert to OpenCV
     frame = np.array(frame, dtype=np.uint8)
     return frame
 
@@ -143,7 +143,7 @@ def watch_for_people():
 speak("PioPet is ready.")
 
 while True:
-    #no speech recognition -> manual test input
+    #no speech recognition then manual test input
     text = input("Type what you said: ").lower()
 
     name = extract_name(text)
