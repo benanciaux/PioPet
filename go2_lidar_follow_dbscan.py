@@ -94,10 +94,10 @@ def detect_human_cluster(clusters):
         center = np.mean(cluster, axis=0)
         distance = np.linalg.norm(center)
 
-        # cluster width estimation
+        #cluster width estimation
         width = np.max(cluster[:,1]) - np.min(cluster[:,1])
 
-        # human-like filters
+        #human-like filters
         if 0.2 < width < 0.9 and 0.4 < distance < 3.5:
             if distance < best_distance:
                 best_distance = distance
@@ -113,11 +113,11 @@ def follow_controller(target):
     distance = np.sqrt(x*x + y*y)
     angle = np.arctan2(y, x)
 
-    # proportional control
+    #proportional control
     forward = (distance - DESIRED_DISTANCE) * 0.6
     turn = angle * 1.2
 
-    # clamp speeds
+    #clamp speeds
     forward = np.clip(forward, -0.2, 0.4)
     turn = np.clip(turn, -0.8, 0.8)
 
@@ -135,7 +135,7 @@ def follow_loop():
         scan = lidar.get_scan()
         points = scan_to_points(scan)
 
-        # focus front hemisphere
+        #focus front hemisphere
         points = points[points[:,0] > 0]
 
         clusters = cluster_points(points)
